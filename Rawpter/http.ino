@@ -1,16 +1,19 @@
-void setupWiFi() {
+void setupWiFi()
+{
   char ssid[] = "_Rawpter";
   char pass[] = "12345678";
 
   // check for the WiFi module:
-  if (WiFi.status() == WL_NO_MODULE) {
+  if (WiFi.status() == WL_NO_MODULE)
+  {
     // don't continue because this is probably not an RP2040
     while (true)
       ;
   }
 
   String fv = WiFi.firmwareVersion();
-  if (fv < WIFI_FIRMWARE_LATEST_VERSION) {
+  if (fv < WIFI_FIRMWARE_LATEST_VERSION)
+  {
     Serial.println("Please upgrade the firmware");
   }
 
@@ -26,9 +29,11 @@ void setupWiFi() {
 
   // Create open network. Change this line if you want to create an WEP network:
   status = WiFi.beginAP(ssid, pass);
-  if (status != WL_AP_LISTENING) {
+  if (status != WL_AP_LISTENING)
+  {
     // don't continue
-    while (true);
+    while (true)
+      ;
   }
 
   // wait 1 seconds for connection:
@@ -41,8 +46,8 @@ void setupWiFi() {
   printWiFiStatus();
 }
 
-
-void printWiFiStatus() {
+void printWiFiStatus()
+{
   // print the SSID of the network you're attached to:
   Serial.print("SSID: ");
   Serial.println(WiFi.SSID());
@@ -57,247 +62,319 @@ void printWiFiStatus() {
   Serial.println(ip);
 }
 
-void loopWiFi() {
-  // compare the previous status to the current status
-  WiFiClient client = server.available();  // listen for incoming clients
-  if (client) {                            // if you get a client,
-    String currentLine = "";               // make a String to hold incoming data from the client
-    while (client.connected()) {           // loop while the client's connected
-      if (client.available()) {            // if there's bytes to read from the client,
-        char c = client.read();            // read a byte, then
-        if (c == '\n') {
-          // if the current line is blank, you got two newline characters in a row.
-          // that's the end of the client HTTP request, so send a response:
-          if (currentLine.length() == 0) {
-            break;
-          } else {  // if you got a newline, then clear currentLine:
-            currentLine = "";
-          }
-        } else if (c != '\r') {  // if you got anything else but a carriage return character,
-          currentLine += c;      // add it to the end of the currentLine
-        }
-        // if (currentLine.endsWith("OPTIONS /data.json")) {
-        //   // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-        //   // and a content-type so the client knows what's coming, then a blank line:
-        //   client.println("HTTP/1.1 200 OK");
-        //   client.println("Access-Control-Allow-Origin: *");
-        //   // client.println("Content-type:application/json");
-        //   client.println();
-        //   // the content of the HTTP response follows the header:
-        //   client.print(data);
-        //   client.println();  // The HTTP response ends with another blank line:
-        //   continue;
-        // }
-// Serial.println(currentLine);
+void loopWiFi()
+{
+  WiFiClient client = server.available(); // listen for incoming clients
+  if (!client)
+  {
+    return;
+  }
 
-        if (currentLine.endsWith("GET /data.json")) {
-          String data = createJSON();
+  // if you get a client,
+  String currentLine = ""; // make a String to hold incoming data from the client
+  String request = "";
 
-          // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-          // and a content-type so the client knows what's coming, then a blank line:
-          client.println("HTTP/1.1 200 OK");
-          client.println("Content-type:application/json");
-          client.println("Access-Control-Allow-Origin: *");
-          client.println();
+  while (client.connected())
+  { // loop while the client's connected
+    if (client.available())
+    { // if there's bytes to read from the client,
+      request = client.readStringUntil('\n');
+      // request.trim();
 
-          // the content of the HTTP response follows the header:
-          client.print(data);
-          client.println();  // The HTTP response ends with another blank line:
+      if (request.equals("\r")) // the end of HTTP request
+        break;
 
-          continue;
-        }
+      Serial.print("<< ");
+      Serial.println(request); // print HTTP request to Serial Monitor
 
-        if (currentLine.endsWith("GET /?")) {
-          setTheValuesFromUserForm(client);
-          //Handle clicking the Begin button
-          MakeWebPage(client, "<meta http-equiv = \"refresh\" content = \"0; url = http://192.168.2.4 \"/>");
-        } else if (currentLine.endsWith("GET / HTTP")) {  //Handle hitting the basic page (1st connection)
-          String myMsg = "<h1>Rawpter V1.7</h1><small>by Raising Awesome</small><br>";
-          //For the battery voltage calc, you can use ohm's law on your chosen voltage divider resistors and get the voltage ratio of the 12bit ADC.  I simply recorded values against fed voltages from my bench power supply and fit 
-          //a line.  Good ole' y=mx+b.
-          myMsg += "<b>Snapshot:</b><br>Desired Roll=" + String(roll_des) + "&#176;&nbsp;&nbsp;&nbsp;IMU Roll=" + String(roll_IMU) + "&#176;<br>Desired Pitch= " + String(pitch_des) + "&#176;&nbsp;&nbsp;&nbsp;IMU Pitch=" + String(pitch_IMU) + "&#176;<br>Loop Time= " + String(int(round(1 / (deltaTime)))) + "&nbsp;&nbsp;&nbsp;Throttle PWM=" + String(PWM_throttle) + "<br>Battery=" + String( (4.4695/104.0+((float)batteryVoltage/104.0)),1) + "V (" + String(batteryVoltage) + ")<br>";
-          if (batteryVoltage<1350) myMsg+="<br><div class='alert alert-danger'>DANGER: BATTERY LOW!</div><br>";
-          myMsg += GetParameters() + "<br><input class='mt-2 btn btn-primary' type=submit value='submit' />";
-          MakeWebPage(client, myMsg);
-        }
-      }
+      processHeaderLine(request, client);
     }
-    // close the connection:
-    client.stop();
+  }
+
+  Serial.print("<< END");
+  // give the web browser time to receive the data
+  delay(10);
+
+  // close the connection:
+  client.stop();
+}
+
+void processHeaderLine(String request, WiFiClient client) {
+  if (request.startsWith("GET /data.json"))
+  {
+    String data = createJSON();
+    sendJSONResponse(client, data);
+    // continue;
+  }
+  if (request.startsWith("GET /?"))
+  {
+    setTheValuesFromUserForm(client);
+    // Handle clicking the Begin button
+    MakeWebPage(client, "<meta http-equiv = \"refresh\" content = \"0; url = http://192.168.2.4 \"/>");
+  }
+  if (request.startsWith("GET / HTTP"))
+  {
+    // Handle hitting the basic page (1st connection)
+    String myMsg = createMainPageContent();
+    MakeWebPage(client, myMsg);
   }
 }
 
-void setTheValuesFromUserForm(WiFiClient client) {
+void sendJSONResponse(WiFiClient &client, const String &data)
+{
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-type:application/json");
+  client.println("Access-Control-Allow-Origin: *");
+  client.println();
+  client.print(data);
+  client.println();
+}
+
+String createMainPageContent()
+{
+  String myMsg = "<h1>Rawpter V1.7</h1><small>by Raising Awesome</small><br>";
+  myMsg += "<b>Snapshot:</b><br>";
+  myMsg += "Desired Roll=" + String(roll_des) + "&#176;&nbsp;&nbsp;&nbsp;IMU Roll=" + String(roll_IMU) + "&#176;<br>";
+  myMsg += "Desired Pitch= " + String(pitch_des) + "&#176;&nbsp;&nbsp;&nbsp;IMU Pitch=" + String(pitch_IMU) + "&#176;<br>";
+  myMsg += "Loop Time= " + String(int(round(1 / (deltaTime)))) + "&nbsp;&nbsp;&nbsp;Throttle PWM=" + String(PWM_throttle) + "<br>";
+  myMsg += "Battery=" + String((4.4695 / 104.0 + ((float)batteryVoltage / 104.0)), 1) + "V (" + String(batteryVoltage) + ")<br>";
+
+  if (batteryVoltage < 1350)
+  {
+    myMsg += "<br><div class='alert alert-danger'>DANGER: BATTERY LOW!</div><br>";
+  }
+
+  myMsg += GetParameters() + "<br><input class='mt-2 btn btn-primary' type=submit value='submit' />";
+  return myMsg;
+}
+
+void setTheValuesFromUserForm(WiFiClient client)
+{
   String currentLine = "";
   UPONLYMODE = false;
-  while (client.connected()) {  // loop while the client's connected
-    if (client.available()) {   // if there's bytes to read from the client,
-      char c = client.read();   // read a byte, then
-      if (c == '\n') {
+  while (client.connected())
+  { // loop while the client's connected
+    if (client.available())
+    {                         // if there's bytes to read from the client,
+      char c = client.read(); // read a byte, then
+      if (c == '\n')
+      {
         // if the current line is blank, you got two newline characters in a row.
         // that's the end of the client HTTP request, so send a response:
-        if (currentLine.length() == 0) {
+        if (currentLine.length() == 0)
+        {
           break;
-        } else {  // if you got a newline, then clear currentLine:
+        }
+        else
+        { // if you got a newline, then clear currentLine:
           currentLine = "";
         }
-      } else if (c != '\r') {  // if you got anything else but a carriage return character,
-        currentLine += c;      // add it to the end of the currentLine
       }
-      if (currentLine.endsWith("maxMotor=")) {
+      else if (c != '\r')
+      {                   // if you got anything else but a carriage return character,
+        currentLine += c; // add it to the end of the currentLine
+      }
+      if (currentLine.endsWith("maxMotor="))
+      {
         String myValue = "";
 
-        while (!currentLine.endsWith("&")) {
+        while (!currentLine.endsWith("&"))
+        {
           c = client.read();
-          if (c != '&') myValue += c;
+          if (c != '&')
+            myValue += c;
           currentLine += c;
         }
         maxMotor = myValue.toFloat();
       }
-      if (currentLine.endsWith("stick_dampener=")) {
+      if (currentLine.endsWith("stick_dampener="))
+      {
         String myValue = "";
 
-        while (!currentLine.endsWith("&")) {
+        while (!currentLine.endsWith("&"))
+        {
           c = client.read();
-          if (c != '&') myValue += c;
+          if (c != '&')
+            myValue += c;
           currentLine += c;
         }
         stick_dampener = myValue.toFloat();
       }
 
-      if (currentLine.endsWith("i_limit=")) {
+      if (currentLine.endsWith("i_limit="))
+      {
         String myValue = "";
 
-        while (!currentLine.endsWith("&")) {
+        while (!currentLine.endsWith("&"))
+        {
           c = client.read();
-          if (c != '&') myValue += c;
+          if (c != '&')
+            myValue += c;
           currentLine += c;
         }
         i_limit = myValue.toFloat();
       }
-      if (currentLine.endsWith("Accel_filter=")) {
+      if (currentLine.endsWith("Accel_filter="))
+      {
         String myValue = "";
 
-        while (!currentLine.endsWith("&")) {
+        while (!currentLine.endsWith("&"))
+        {
           c = client.read();
-          if (c != '&') myValue += c;
+          if (c != '&')
+            myValue += c;
           currentLine += c;
         }
         Accel_filter = myValue.toFloat();
       }
-      if (currentLine.endsWith("Gyro_filter=")) {
+      if (currentLine.endsWith("Gyro_filter="))
+      {
         String myValue = "";
 
-        while (!currentLine.endsWith("&")) {
+        while (!currentLine.endsWith("&"))
+        {
           c = client.read();
-          if (c != '&') myValue += c;
+          if (c != '&')
+            myValue += c;
           currentLine += c;
         }
         Gyro_filter = myValue.toFloat();
       }
 
-      if (currentLine.endsWith("UPONLYMODE=")) {
+      if (currentLine.endsWith("UPONLYMODE="))
+      {
         String myValue = "";
 
-        while (!currentLine.endsWith("&")) {
+        while (!currentLine.endsWith("&"))
+        {
           c = client.read();
-          if (c != '&') myValue += c;
+          if (c != '&')
+            myValue += c;
           currentLine += c;
         }
-        if (myValue == "true") UPONLYMODE = true;
-        else UPONLYMODE = false;
+        if (myValue == "true")
+          UPONLYMODE = true;
+        else
+          UPONLYMODE = false;
       }
 
-      if (currentLine.endsWith("kp_roll_angle=")) {
+      if (currentLine.endsWith("kp_roll_angle="))
+      {
         String myValue = "";
 
-        while (!currentLine.endsWith("&")) {
+        while (!currentLine.endsWith("&"))
+        {
           c = client.read();
-          if (c != '&') myValue += c;
+          if (c != '&')
+            myValue += c;
           currentLine += c;
         }
         Kp_roll_angle = myValue.toFloat();
       }
 
-      if (currentLine.endsWith("ki_roll_angle=")) {
+      if (currentLine.endsWith("ki_roll_angle="))
+      {
         String myValue = "";
 
-        while (!currentLine.endsWith("&")) {
+        while (!currentLine.endsWith("&"))
+        {
           c = client.read();
-          if (c != '&') myValue += c;
+          if (c != '&')
+            myValue += c;
           currentLine += c;
         }
         Ki_roll_angle = myValue.toFloat();
       }
-      if (currentLine.endsWith("kd_roll_angle=")) {
+      if (currentLine.endsWith("kd_roll_angle="))
+      {
         String myValue = "";
 
-        while (!currentLine.endsWith("&")) {
+        while (!currentLine.endsWith("&"))
+        {
           c = client.read();
-          if (c != '&') myValue += c;
+          if (c != '&')
+            myValue += c;
           currentLine += c;
         }
         Kd_roll_angle = myValue.toFloat();
       }
 
       //
-      if (currentLine.endsWith("kp_pitch_angle=")) {
+      if (currentLine.endsWith("kp_pitch_angle="))
+      {
         String myValue = "";
 
-        while (!currentLine.endsWith("&")) {
+        while (!currentLine.endsWith("&"))
+        {
           c = client.read();
-          if (c != '&') myValue += c;
+          if (c != '&')
+            myValue += c;
           currentLine += c;
         }
         Kp_pitch_angle = myValue.toFloat();
       }
-      if (currentLine.endsWith("ki_pitch_angle=")) {
+      if (currentLine.endsWith("ki_pitch_angle="))
+      {
         String myValue = "";
 
-        while (!currentLine.endsWith("&")) {
+        while (!currentLine.endsWith("&"))
+        {
           c = client.read();
-          if (c != '&') myValue += c;
+          if (c != '&')
+            myValue += c;
           currentLine += c;
         }
         Ki_pitch_angle = myValue.toFloat();
       }
-      if (currentLine.endsWith("kd_pitch_angle=")) {
+      if (currentLine.endsWith("kd_pitch_angle="))
+      {
         String myValue = "";
 
-        while (!currentLine.endsWith("&")) {
+        while (!currentLine.endsWith("&"))
+        {
           c = client.read();
-          if (c != '&') myValue += c;
+          if (c != '&')
+            myValue += c;
           currentLine += c;
         }
         Kd_pitch_angle = myValue.toFloat();
       }
-      //yaw
-      if (currentLine.endsWith("kp_yaw=")) {
+      // yaw
+      if (currentLine.endsWith("kp_yaw="))
+      {
         String myValue = "";
 
-        while (!currentLine.endsWith("&")) {
+        while (!currentLine.endsWith("&"))
+        {
           c = client.read();
-          if (c != '&') myValue += c;
+          if (c != '&')
+            myValue += c;
           currentLine += c;
         }
         Kp_yaw = myValue.toFloat();
       }
-      if (currentLine.endsWith("ki_yaw=")) {
+      if (currentLine.endsWith("ki_yaw="))
+      {
         String myValue = "";
 
-        while (!currentLine.endsWith("&")) {
+        while (!currentLine.endsWith("&"))
+        {
           c = client.read();
-          if (c != '&') myValue += c;
+          if (c != '&')
+            myValue += c;
           currentLine += c;
         }
         Ki_yaw = myValue.toFloat();
       }
-      if (currentLine.endsWith("kd_yaw=")) {
+      if (currentLine.endsWith("kd_yaw="))
+      {
         String myValue = "";
 
-        while (!currentLine.endsWith("&")) {
+        while (!currentLine.endsWith("&"))
+        {
           c = client.read();
-          if (c != '&') myValue += c;
+          if (c != '&')
+            myValue += c;
           currentLine += c;
         }
         Kd_yaw = myValue.toFloat();
@@ -307,7 +384,8 @@ void setTheValuesFromUserForm(WiFiClient client) {
   }
 }
 
-String GetParameters() {
+String GetParameters()
+{
   String myString;
   myString = myString + "<table><tr><td>Max Motor Speed (0.0-1.0):</td><td><input type=number step=.001 name=maxMotor style='width:70px;' value='" + String(maxMotor) + "'></td></tr>";
   myString = myString + "<tr><td>Stick Dampening (0.01-1.0):<br>0.1=slow/steady, 1.0=noisy/fast</td><td><input type=number step=.001 name=stick_dampener style='width:70px;' value='" + String(stick_dampener) + "'></td></tr>";
@@ -315,8 +393,10 @@ String GetParameters() {
   myString = myString + "<tr><td>Accel Dampening (0.1-1.0):<br>0.1=slow/steady, 1.0=noisy/fast</td><td><input type=number step=.001 name=Accel_filter style='width:70px;' value='" + String(Accel_filter) + "'></td></tr>";
   myString = myString + "<tr><td>Gyro Dampening (0.1-1.0 ):<br>0.1=slow/steady, 1.0=noisy/fast</td><td><input type=number step=.001 name=Gyro_filter style='width:70px;' value='" + String(Gyro_filter) + "'></td></tr>";
   String myVal;
-  if (!UPONLYMODE) myVal = "";
-  else myVal = "checked";
+  if (!UPONLYMODE)
+    myVal = "";
+  else
+    myVal = "checked";
   myString = myString + "<tr><td>Up Mode Only:</td><td><input type=CHECKBOX name=UPONLYMODE value='true' " + (myVal) + "></td></tr>";
   myString = myString + "</table>";
   myString = myString + "<table class=table><thead class=thead-dark><th></th><th>Kp</th><th>Ki</th><th>Kd</th></thead>";
@@ -327,7 +407,8 @@ String GetParameters() {
   return myString;
 }
 
-void MakeWebPage(WiFiClient client, String html) {
+void MakeWebPage(WiFiClient client, String html)
+{
   // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
   // and a content-type so the client knows what's coming, then a blank line:
   client.println("HTTP/1.1 200 OK");
@@ -346,5 +427,5 @@ void MakeWebPage(WiFiClient client, String html) {
   client.print(tuningProcedure());
   client.print("</div></form>");
   client.print("<script src=\"https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js\" integrity=\"sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p\" crossorigin=\"anonymous\"></script>");
-  client.println();  // The HTTP response ends with another blank line:
+  client.println(); // The HTTP response ends with another blank line:
 }

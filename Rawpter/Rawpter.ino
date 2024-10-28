@@ -668,14 +668,12 @@ void calibrateESCs() {
 
 /**
  * Directly set actuator outputs to minimum value if triggered
+ * Monitors the state of radio command PWM_throttle and directly sets the mx_command_PWM values to minimum (1060 is
+ * minimum , 0 is minimum for standard PWM servo library used) if channel 5 is high. This is the last function 
+ * called before commandMotors() is called so that the last thing checked is if the user is giving permission to command
+ * the motors to anything other than minimum value. Safety first. 
  */
 void throttleCut() {
-  /*
-   * Monitors the state of radio command PWM_throttle and directly sets the mx_command_PWM values to minimum (1060 is
-   * minimum , 0 is minimum for standard PWM servo library used) if channel 5 is high. This is the last function 
-   * called before commandMotors() is called so that the last thing checked is if the user is giving permission to command
-   * the motors to anything other than minimum value. Safety first. 
-   */
   #if EASYCHAIR 
     //This is set above in compiler directives for when you are testing the Arduino outside of the drone.
     throttle_is_cut = false;
@@ -708,8 +706,10 @@ void throttleCut() {
   throttleCutCounter = 0;
 }
 
+/**
+ * sets the PWM to its lowest value to shut off a motor such as whne the throttle cut switch is fliped.
+ */
 void killMotors() {
-  //sets the PWM to its lowest value to shut off a motor such as whne the throttle cut switch is fliped.
   throttle_is_cut = true;
   throttleCutCounter=10; //to prevent overflowing float
   m1_command_PWM = 0;

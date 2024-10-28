@@ -332,8 +332,10 @@ void controlMixer() {
   m4_command_scaled = constrain(m4_command_scaled, 0, 1.0);
 }
 
+/**
+ * Initialize IMU
+ */
 void IMUinit() {
-  //DESCRIPTION: Initialize IMU
   if (!IMU.begin()) {
     while (true)
       ;
@@ -341,9 +343,10 @@ void IMUinit() {
   delay(15);
 }
 
+/**
+ * Request full dataset from IMU
+ */
 void getIMUdata() {
-  //DESCRIPTION: Request full dataset from IMU
-
   //Accelerometer
   if (IMU.accelerationAvailable()) {
     IMU.readAcceleration(AccX, AccY, AccZ);
@@ -380,8 +383,10 @@ void getIMUdata() {
   }
 }
 
+/**
+ * Computes IMU accelerometer and gyro error on startup. Note: vehicle should be powered up on flat surface
+ */
 void calculate_IMU_error() {
-  //DESCRIPTION: Computes IMU accelerometer and gyro error on startup. Note: vehicle should be powered up on flat surface
   /*
    * The error values it computes are applied to the raw gyro and 
    * accelerometer values AccX, AccY, AccZ, GyroX, GyroY, GyroZ in getIMUdata().
@@ -446,8 +451,10 @@ void calculate_IMU_error() {
   while (true) delay(1000);
 }
 
+/**
+ * Attitude estimation through sensor fusion - 6DOF
+ */
 void Madgwick6DOF(float gx, float gy, float gz, float ax, float ay, float az) {
-  //DESCRIPTION: Attitude estimation through sensor fusion - 6DOF
   /*
    * See description of Madgwick() for more information. This is a 6DOF implimentation for when magnetometer data is not
    * available (for example when using the recommended MPU6050 IMU for the default setup).
@@ -528,8 +535,10 @@ void Madgwick6DOF(float gx, float gy, float gz, float ax, float ay, float az) {
   yaw_IMU = -atan2(q1 * q2 + q0 * q3, 0.5f - q2 * q2 - q3 * q3) * 57.29577951;  //degrees
 }
 
+/**
+ * Normalizes desired control values to appropriate values
+ */
 void getDesiredAnglesAndThrottle() {
-  //DESCRIPTION: Normalizes desired control values to appropriate values
   /*
    * Updates the desired state variables thro_des, roll_des, pitch_des, and yaw_des. These are computed by using the raw
    * RC pwm commands and scaling them to be within our limits defined in setup. thro_des stays within 0 to 1 range.
@@ -548,8 +557,10 @@ void getDesiredAnglesAndThrottle() {
   yaw_des = constrain(yaw_des, -1.0, 1.0) * maxYaw;        //Between -maxYaw and +maxYaw
 }
 
+/**
+ * Computes control commands based on state error (angle)
+ */
 void PIDControlCalcs() {
-  //DESCRIPTION: Computes control commands based on state error (angle)
   /*
    * Basic PID control to stablize on angle setpoint based on desired states roll_des, pitch_des, and yaw_des computed in 
    * getDesiredAnglesAndThrottle(). Error is simply the desired state minus the actual state (ex. roll_des - roll_IMU). Two safety features
@@ -609,8 +620,10 @@ void PIDControlCalcs() {
   integral_yaw_prev = integral_yaw;
 }
 
+/**
+ * Scale normalized actuator commands to values for ESC protocol
+ */
 void scaleCommands() {
-  //DESCRIPTION: Scale normalized actuator commands to values for ESC protocol
   /*
    * The actual pulse width is set at the servo attach.
    */
@@ -621,8 +634,10 @@ void scaleCommands() {
   m4_command_PWM = m4_command_scaled * 180;  
 }
 
+/**
+ * Get raw PWM values for every channel from the radio
+ */
 void getRadioSticks() {
-  //DESCRIPTION: Get raw PWM values for every channel from the radio
   /*
    * Updates radio PWM commands in loop based on current available commands. channel_x_pwm is the raw command used in the rest of 
    * the loop.
@@ -662,8 +677,10 @@ void setToFailsafe() {
   PWM_ThrottleCutSwitch = PWM_ThrottleCutSwitch_fs;  //this is so the throttle cut routine doesn't override the fail safes.
 }
 
+/**
+ * If radio gives garbage values, set all commands to default values
+ */
 void failSafe() {
-  //DESCRIPTION: If radio gives garbage values, set all commands to default values
   /*
    * Radio connection failsafe used to check if the getRadioSticks() function is returning acceptable pwm values. If any of 
    * the commands are lower than 800 or higher than 2200, then we can be certain that there is an issue with the radio
@@ -690,16 +707,20 @@ void failSafe() {
   #endif
 }
 
+/**
+ * Send pulses to motor pins
+ */
 void commandMotors() {
-  //DESCRIPTION: Send pulses to motor pins
   m1PWM.write(m1_command_PWM);
   m2PWM.write(m2_command_PWM);
   m3PWM.write(m3_command_PWM);
   m4PWM.write(m4_command_PWM);
 }
 
+/**
+ * Used in void setup() to allow standard ESC calibration procedure with the radio to take place.
+ */
 void calibrateESCs() {
-  //DESCRIPTION: Used in void setup() to allow standard ESC calibration procedure with the radio to take place.
   /*  
    *  Simulates the void loop(), but only for the purpose of providing throttle pass through to the motors, so that you can
    *  power up with throttle at full, let ESCs begin arming sequence, and lower throttle to zero.
@@ -716,8 +737,10 @@ void calibrateESCs() {
   delay(5000);
 }
 
+/**
+ * Directly set actuator outputs to minimum value if triggered
+ */
 void throttleCut() {
-  //DESCRIPTION: Directly set actuator outputs to minimum value if triggered
   /*
    * Monitors the state of radio command PWM_throttle and directly sets the mx_command_PWM values to minimum (1060 is
    * minimum , 0 is minimum for standard PWM servo library used) if channel 5 is high. This is the last function 
@@ -766,8 +789,10 @@ void killMotors() {
   m4_command_PWM = 0;
 }
 
+/**
+ * Regulate main loop rate to specified frequency in Hz
+ */
 void tock() {
-  //DESCRIPTION: Regulate main loop rate to specified frequency in Hz
   /*
    * It's good to operate at a constant loop rate for filters to remain stable and whatnot. Interrupt routines running in the
    * background cause the loop rate to fluctuate. This function basically just waits at the end of every loop iteration until 
@@ -873,9 +898,6 @@ void getCh5() {
   }
 }
 
-String tuningProcedure() {
-  return "<hr><h3><b>Ziegler-Nichols</b></h3>  <p>The Ziegler-Nichols tuning method is one of the most famous ways to experimentally tune a PID controller. The basic algorithm is as follows:</p><ol><li>Turn off the Integral and Derivative components for the controller; only use Proportional control.</li><li>Slowly increase the gain (i.e. <em>K<sub>p</sub></em>, the Proportion constant) until the process starts to oscillate<br />This final gain value is known as the ultimate gain, or <em>K<sub>u</sub></em><br />The period of oscillation is the ultimate period, or <em>T<sub>u</sub></em></li><li>Use the following table to derive the PID variables</li></ol></div></div><div class=\"sqs-block code-block sqs-block-code\" data-block-type=\"23\" id=\"block-yui_3_17_2_1_1598301478634_207710\"><div class=\"sqs-block-content\"><style type=\"text/css\">.tg  {border-collapse:collapse;border-spacing:0;}.tg td{border-color:black;border-style:solid;border-width:1px;  overflow:hidden;padding:10px 5px;word-break:normal;}.tg th{border-color:black;border-style:solid;border-width:1px;  font-weight:normal;overflow:hidden;padding:10px 5px;word-break:normal;}.tg .tg-gr1d{background-color:#e9f4fc;border-color:#337494;font-weight:bold;text-align:left;vertical-align:top}.tg .tg-m4ds{border-color:#337494;text-align:center;vertical-align:top}.tg .tg-bxxa{border-color:#337494;text-align:left;vertical-align:top}.tg .tg-hk19{background-color:#e9f4fc;border-color:#337494;font-weight:bold;text-align:center;vertical-align:top}.tg .tg-vaq8{background-color:#e9f4fc;border-color:#337494;text-align:left;vertical-align:top}.tg .tg-e1cu{background-color:#e9f4fc;border-color:#337494;text-align:center;vertical-align:top}</style><table class=\"table\"><thead>  <tr>    <th class=\"tg-gr1d\">Controller</th>    <th class=\"tg-hk19\">K<sub>p</sub></th>    <th class=\"tg-hk19\">T<sub>i</sub></th>    <th class=\"tg-hk19\">T<sub>d</sub></th>  </tr></thead><tbody>  <tr>    <td class=\"tg-bxxa\">P</td>    <td class=\"tg-m4ds\">K<sub>u</sub>/2</td>    <td class=\"tg-m4ds\"></td>    <td class=\"tg-m4ds\"></td>  </tr>  <tr>    <td class=\"tg-vaq8\">PI</td>    <td class=\"tg-e1cu\">K<sub>u</sub>/2.5</td>    <td class=\"tg-e1cu\">T<sub>u</sub>/1.25</td>    <td class=\"tg-e1cu\"></td>  </tr>  <tr>    <td class=\"tg-bxxa\">PID</td>    <td class=\"tg-m4ds\">0.6K<sub>u</sub></td>    <td class=\"tg-m4ds\">T<sub>u</sub>/2</td>    <td class=\"tg-m4ds\">T<sub>u</sub>/8</td>  </tr>  <tr>    <td class=\"tg-vaq8\">Pessen Integral Rule<br></td>    <td class=\"tg-e1cu\">0.7K<sub>u</sub></td>    <td class=\"tg-e1cu\">0.4T<sub>u</sub></td>    <td class=\"tg-e1cu\">0.15T<sub>u</sub></td>  </tr>  <tr>    <td class=\"tg-bxxa\">Moderate overshoot</td>    <td class=\"tg-m4ds\">K<sub>u</sub>/3</td>    <td class=\"tg-m4ds\">T<sub>u</sub>/2</td>    <td class=\"tg-m4ds\">T<sub>u</sub>/3</td>  </tr>  <tr>    <td class=\"tg-vaq8\">No overshoot</td>    <td class=\"tg-e1cu\">K<sub>u</sub>/5</td>    <td class=\"tg-e1cu\">T<sub>u</sub>/2</td>    <tdclass=\"tg-e1cu\">T<sub>u</sub>/3</td>  </tr></tbody></table>";
-}
 //HELPER FUNCTIONS
 
 float invSqrt(float x) {

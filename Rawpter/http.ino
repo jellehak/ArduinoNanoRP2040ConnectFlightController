@@ -1,3 +1,8 @@
+#include <ArduinoJson.h>
+
+// Define the pin for the built-in LED
+#define LED_PIN LED_BUILTIN
+
 void setupWiFi()
 {
   char ssid[] = "_Rawpter";
@@ -6,7 +11,7 @@ void setupWiFi()
   // check for the WiFi module:
   if (WiFi.status() == WL_NO_MODULE)
   {
-    // don't continue because this is probably not an RP2040
+    Serial.println("Communication with WiFi module failed!");
     while (true)
       ;
   }
@@ -17,21 +22,13 @@ void setupWiFi()
     Serial.println("Please upgrade the firmware");
   }
 
-  // by default the local IP address will be 192.168.4.1
-  // you can override it with the following:
-  // WiFi.config(IPAddress(10, 0, 0, 1));
-  // Just picked this out of the air.  Throw back to Jeff Gordon
-  // WiFi.config(IPAddress(192, 168, 2, 4));
-
-  // print the network name (SSID);
   Serial.print("Creating access point named: ");
   Serial.println(ssid);
 
-  // Create open network. Change this line if you want to create an WEP network:
   status = WiFi.beginAP(ssid, pass);
   if (status != WL_AP_LISTENING)
   {
-    // don't continue
+    Serial.println("Creating access point failed");
     while (true)
       ;
   }
@@ -42,390 +39,201 @@ void setupWiFi()
   // start the web server on port 80
   server.begin();
 
-  // you're connected now, so print out the status
+  // Initialize the LED pin as an output
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW); // Start with the LED off
+
   printWiFiStatus();
 }
 
 void printWiFiStatus()
 {
-  // print the SSID of the network you're attached to:
   Serial.print("SSID: ");
   Serial.println(WiFi.SSID());
 
-  // print your WiFi shield's IP address:
   IPAddress ip = WiFi.localIP();
   Serial.print("IP Address: ");
   Serial.println(ip);
 
-  // print where to go in a browser:
   Serial.print("To see this page in action, open a browser to http://");
   Serial.println(ip);
 }
 
 void loopWiFi()
 {
-  WiFiClient client = server.available(); // listen for incoming clients
-  if (!client)
+  WiFiClient client = server.available();
+  if (client)
   {
+    String request = "";
+    unsigned long timeout = millis() + 5000; // 5 second timeout
+
+    // Read the entire request
+    while (client.connected() && millis() < timeout)
+    {
+      if (client.available())
+      {
+        char c = client.read();
+        request += c;
+        if (c == '\n' && request.endsWith("\r\n\r\n"))
+        {
+          // End of headers
+          break;
+        }
+      }
+    }
+
+    // Process the request
+    if (!request.isEmpty())
+    {
+      Serial.println("Received request:");
+      Serial.println(request);
+      handleRequest(client, request);
+    }
+
+    // Close the connection
+    client.stop();
+  }
+}
+
+void handleRequest(WiFiClient &client, const String &request)
+{
+  // Set CORS headers for all responses
+  client.println("HTTP/1.1 200 OK");
+  client.println("Access-Control-Allow-Origin: *");
+  client.println("Access-Control-Allow-Methods: GET, POST, OPTIONS");
+  client.println("Access-Control-Allow-Headers: Content-Type");
+
+  // Handle CORS preflight request
+  if (request.startsWith("OPTIONS"))
+  {
+    client.println("Content-Type: text/plain");
+    client.println();
     return;
   }
 
-  // if you get a client,
-  String currentLine = ""; // make a String to hold incoming data from the client
-  String request = "";
-
-  while (client.connected())
-  { // loop while the client's connected
-    if (client.available())
-    { // if there's bytes to read from the client,
-      request = client.readStringUntil('\n');
-      // request.trim();
-
-      if (request.equals("\r")) // the end of HTTP request
-        break;
-
-      Serial.print("<< ");
-      Serial.println(request); // print HTTP request to Serial Monitor
-
-      processHeaderLine(request, client);
-    }
-  }
-
-  Serial.print("<< END");
-  // give the web browser time to receive the data
-  delay(10);
-
-  // close the connection:
-  client.stop();
-}
-
-void processHeaderLine(String request, WiFiClient client) {
-  if (request.startsWith("GET /data.json"))
+  if (request.startsWith("GET /config"))
   {
-    String data = createJSON();
-    sendJSONResponse(client, data);
-    // continue;
+    sendJSONResponse(client, createJSON());
   }
-  if (request.startsWith("GET /?"))
+  else if (request.startsWith("POST /config"))
   {
-    setTheValuesFromUserForm(client);
-    // Handle clicking the Begin button
-    MakeWebPage(client, "<meta http-equiv = \"refresh\" content = \"0; url = http://192.168.2.4 \"/>");
+    updateDataFromJSON(client);
   }
-  if (request.startsWith("GET / HTTP"))
+  else
   {
-    // Handle hitting the basic page (1st connection)
-    String myMsg = createMainPageContent();
-    MakeWebPage(client, myMsg);
+    // Handle unknown requests
+    client.println("HTTP/1.1 404 Not Found");
+    client.println("Content-Type: text/plain");
+    client.println();
+    client.println("404 Not Found");
   }
 }
 
 void sendJSONResponse(WiFiClient &client, const String &data)
 {
   client.println("HTTP/1.1 200 OK");
-  client.println("Content-type:application/json");
-  client.println("Access-Control-Allow-Origin: *");
+  client.println("Content-Type: application/json");
+  client.println("Connection: close");
   client.println();
-  client.print(data);
-  client.println();
+  client.println(data);
 }
 
-String createMainPageContent()
+String createJSON()
 {
-  String myMsg = "<h1>Rawpter V1.7</h1><small>by Raising Awesome</small><br>";
-  myMsg += "<b>Snapshot:</b><br>";
-  myMsg += "Desired Roll=" + String(roll_des) + "&#176;&nbsp;&nbsp;&nbsp;IMU Roll=" + String(roll_IMU) + "&#176;<br>";
-  myMsg += "Desired Pitch= " + String(pitch_des) + "&#176;&nbsp;&nbsp;&nbsp;IMU Pitch=" + String(pitch_IMU) + "&#176;<br>";
-  myMsg += "Loop Time= " + String(int(round(1 / (deltaTime)))) + "&nbsp;&nbsp;&nbsp;Throttle PWM=" + String(PWM_throttle) + "<br>";
-  myMsg += "Battery=" + String((4.4695 / 104.0 + ((float)batteryVoltage / 104.0)), 1) + "V (" + String(batteryVoltage) + ")<br>";
+  StaticJsonDocument<512> doc;
 
-  if (batteryVoltage < 1350)
+  doc["roll_des"] = roll_des;
+  doc["roll_IMU"] = roll_IMU;
+  doc["pitch_des"] = pitch_des;
+  doc["pitch_IMU"] = pitch_IMU;
+  doc["loop_time"] = int(round(1 / deltaTime));
+  doc["PWM_throttle"] = PWM_throttle;
+  doc["battery_voltage"] = (4.4695 / 104.0 + ((float)batteryVoltage / 104.0));
+  doc["maxMotor"] = maxMotor;
+  doc["stick_dampener"] = stick_dampener;
+  doc["i_limit"] = i_limit;
+  doc["Accel_filter"] = Accel_filter;
+  doc["Gyro_filter"] = Gyro_filter;
+  doc["UPONLYMODE"] = UPONLYMODE;
+  doc["Kp_roll_angle"] = Kp_roll_angle;
+  doc["Ki_roll_angle"] = Ki_roll_angle;
+  doc["Kd_roll_angle"] = Kd_roll_angle;
+  doc["Kp_pitch_angle"] = Kp_pitch_angle;
+  doc["Ki_pitch_angle"] = Ki_pitch_angle;
+  doc["Kd_pitch_angle"] = Kd_pitch_angle;
+  doc["Kp_yaw"] = Kp_yaw;
+  doc["Ki_yaw"] = Ki_yaw;
+  doc["Kd_yaw"] = Kd_yaw;
+  doc["led_status"] = digitalRead(LED_PIN) == HIGH ? "on" : "off";
+
+  String output;
+  serializeJson(doc, output);
+  return output;
+}
+
+void updateDataFromJSON(WiFiClient &client)
+{
+  // Skip headers
+  while (client.available() && client.readStringUntil('\n') != "\r") {}
+
+  // Read the body of the request
+  String jsonStr = "";
+  while (client.available()) {
+    jsonStr += (char)client.read();
+  }
+
+  Serial.println("Received JSON:");
+  Serial.println(jsonStr);
+
+  StaticJsonDocument<512> doc;
+  DeserializationError error = deserializeJson(doc, jsonStr);
+
+  if (error)
   {
-    myMsg += "<br><div class='alert alert-danger'>DANGER: BATTERY LOW!</div><br>";
+    Serial.print(F("deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    sendJSONResponse(client, "{\"status\":\"error\",\"message\":\"Invalid JSON\"}");
+    return;
   }
 
-  myMsg += GetParameters() + "<br><input class='mt-2 btn btn-primary' type=submit value='submit' />";
-  return myMsg;
-}
-
-void setTheValuesFromUserForm(WiFiClient client)
-{
-  String currentLine = "";
-  UPONLYMODE = false;
-  while (client.connected())
-  { // loop while the client's connected
-    if (client.available())
-    {                         // if there's bytes to read from the client,
-      char c = client.read(); // read a byte, then
-      if (c == '\n')
-      {
-        // if the current line is blank, you got two newline characters in a row.
-        // that's the end of the client HTTP request, so send a response:
-        if (currentLine.length() == 0)
-        {
-          break;
-        }
-        else
-        { // if you got a newline, then clear currentLine:
-          currentLine = "";
-        }
-      }
-      else if (c != '\r')
-      {                   // if you got anything else but a carriage return character,
-        currentLine += c; // add it to the end of the currentLine
-      }
-      if (currentLine.endsWith("maxMotor="))
-      {
-        String myValue = "";
-
-        while (!currentLine.endsWith("&"))
-        {
-          c = client.read();
-          if (c != '&')
-            myValue += c;
-          currentLine += c;
-        }
-        maxMotor = myValue.toFloat();
-      }
-      if (currentLine.endsWith("stick_dampener="))
-      {
-        String myValue = "";
-
-        while (!currentLine.endsWith("&"))
-        {
-          c = client.read();
-          if (c != '&')
-            myValue += c;
-          currentLine += c;
-        }
-        stick_dampener = myValue.toFloat();
-      }
-
-      if (currentLine.endsWith("i_limit="))
-      {
-        String myValue = "";
-
-        while (!currentLine.endsWith("&"))
-        {
-          c = client.read();
-          if (c != '&')
-            myValue += c;
-          currentLine += c;
-        }
-        i_limit = myValue.toFloat();
-      }
-      if (currentLine.endsWith("Accel_filter="))
-      {
-        String myValue = "";
-
-        while (!currentLine.endsWith("&"))
-        {
-          c = client.read();
-          if (c != '&')
-            myValue += c;
-          currentLine += c;
-        }
-        Accel_filter = myValue.toFloat();
-      }
-      if (currentLine.endsWith("Gyro_filter="))
-      {
-        String myValue = "";
-
-        while (!currentLine.endsWith("&"))
-        {
-          c = client.read();
-          if (c != '&')
-            myValue += c;
-          currentLine += c;
-        }
-        Gyro_filter = myValue.toFloat();
-      }
-
-      if (currentLine.endsWith("UPONLYMODE="))
-      {
-        String myValue = "";
-
-        while (!currentLine.endsWith("&"))
-        {
-          c = client.read();
-          if (c != '&')
-            myValue += c;
-          currentLine += c;
-        }
-        if (myValue == "true")
-          UPONLYMODE = true;
-        else
-          UPONLYMODE = false;
-      }
-
-      if (currentLine.endsWith("kp_roll_angle="))
-      {
-        String myValue = "";
-
-        while (!currentLine.endsWith("&"))
-        {
-          c = client.read();
-          if (c != '&')
-            myValue += c;
-          currentLine += c;
-        }
-        Kp_roll_angle = myValue.toFloat();
-      }
-
-      if (currentLine.endsWith("ki_roll_angle="))
-      {
-        String myValue = "";
-
-        while (!currentLine.endsWith("&"))
-        {
-          c = client.read();
-          if (c != '&')
-            myValue += c;
-          currentLine += c;
-        }
-        Ki_roll_angle = myValue.toFloat();
-      }
-      if (currentLine.endsWith("kd_roll_angle="))
-      {
-        String myValue = "";
-
-        while (!currentLine.endsWith("&"))
-        {
-          c = client.read();
-          if (c != '&')
-            myValue += c;
-          currentLine += c;
-        }
-        Kd_roll_angle = myValue.toFloat();
-      }
-
-      //
-      if (currentLine.endsWith("kp_pitch_angle="))
-      {
-        String myValue = "";
-
-        while (!currentLine.endsWith("&"))
-        {
-          c = client.read();
-          if (c != '&')
-            myValue += c;
-          currentLine += c;
-        }
-        Kp_pitch_angle = myValue.toFloat();
-      }
-      if (currentLine.endsWith("ki_pitch_angle="))
-      {
-        String myValue = "";
-
-        while (!currentLine.endsWith("&"))
-        {
-          c = client.read();
-          if (c != '&')
-            myValue += c;
-          currentLine += c;
-        }
-        Ki_pitch_angle = myValue.toFloat();
-      }
-      if (currentLine.endsWith("kd_pitch_angle="))
-      {
-        String myValue = "";
-
-        while (!currentLine.endsWith("&"))
-        {
-          c = client.read();
-          if (c != '&')
-            myValue += c;
-          currentLine += c;
-        }
-        Kd_pitch_angle = myValue.toFloat();
-      }
-      // yaw
-      if (currentLine.endsWith("kp_yaw="))
-      {
-        String myValue = "";
-
-        while (!currentLine.endsWith("&"))
-        {
-          c = client.read();
-          if (c != '&')
-            myValue += c;
-          currentLine += c;
-        }
-        Kp_yaw = myValue.toFloat();
-      }
-      if (currentLine.endsWith("ki_yaw="))
-      {
-        String myValue = "";
-
-        while (!currentLine.endsWith("&"))
-        {
-          c = client.read();
-          if (c != '&')
-            myValue += c;
-          currentLine += c;
-        }
-        Ki_yaw = myValue.toFloat();
-      }
-      if (currentLine.endsWith("kd_yaw="))
-      {
-        String myValue = "";
-
-        while (!currentLine.endsWith("&"))
-        {
-          c = client.read();
-          if (c != '&')
-            myValue += c;
-          currentLine += c;
-        }
-        Kd_yaw = myValue.toFloat();
-        return;
-      }
-    }
+  // Update variables
+  if (doc.containsKey("maxMotor"))
+    maxMotor = doc["maxMotor"];
+  if (doc.containsKey("stick_dampener"))
+    stick_dampener = doc["stick_dampener"];
+  if (doc.containsKey("i_limit"))
+    i_limit = doc["i_limit"];
+  if (doc.containsKey("Accel_filter"))
+    Accel_filter = doc["Accel_filter"];
+  if (doc.containsKey("Gyro_filter"))
+    Gyro_filter = doc["Gyro_filter"];
+  if (doc.containsKey("UPONLYMODE"))
+    UPONLYMODE = doc["UPONLYMODE"];
+  if (doc.containsKey("Kp_roll_angle"))
+    Kp_roll_angle = doc["Kp_roll_angle"];
+  if (doc.containsKey("Ki_roll_angle"))
+    Ki_roll_angle = doc["Ki_roll_angle"];
+  if (doc.containsKey("Kd_roll_angle"))
+    Kd_roll_angle = doc["Kd_roll_angle"];
+  if (doc.containsKey("Kp_pitch_angle"))
+    Kp_pitch_angle = doc["Kp_pitch_angle"];
+  if (doc.containsKey("Ki_pitch_angle"))
+    Ki_pitch_angle = doc["Ki_pitch_angle"];
+  if (doc.containsKey("Kd_pitch_angle"))
+    Kd_pitch_angle = doc["Kd_pitch_angle"];
+  if (doc.containsKey("Kp_yaw"))
+    Kp_yaw = doc["Kp_yaw"];
+  if (doc.containsKey("Ki_yaw"))
+    Ki_yaw = doc["Ki_yaw"];
+  if (doc.containsKey("Kd_yaw"))
+    Kd_yaw = doc["Kd_yaw"];
+  if (doc.containsKey("led_status"))
+  {
+    if (doc["led_status"] == true)
+      digitalWrite(LED_PIN, HIGH);
+    else if (doc["led_status"] == false)
+      digitalWrite(LED_PIN, LOW);
   }
-}
 
-String GetParameters()
-{
-  String myString;
-  myString = myString + "<table><tr><td>Max Motor Speed (0.0-1.0):</td><td><input type=number step=.001 name=maxMotor style='width:70px;' value='" + String(maxMotor) + "'></td></tr>";
-  myString = myString + "<tr><td>Stick Dampening (0.01-1.0):<br>0.1=slow/steady, 1.0=noisy/fast</td><td><input type=number step=.001 name=stick_dampener style='width:70px;' value='" + String(stick_dampener) + "'></td></tr>";
-  myString = myString + "<tr><td>Integral Accumulation (25 default):</td><td><input type=number step=.001 name=i_limit style='width:70px;' value='" + String(i_limit) + "'></td></tr>";
-  myString = myString + "<tr><td>Accel Dampening (0.1-1.0):<br>0.1=slow/steady, 1.0=noisy/fast</td><td><input type=number step=.001 name=Accel_filter style='width:70px;' value='" + String(Accel_filter) + "'></td></tr>";
-  myString = myString + "<tr><td>Gyro Dampening (0.1-1.0 ):<br>0.1=slow/steady, 1.0=noisy/fast</td><td><input type=number step=.001 name=Gyro_filter style='width:70px;' value='" + String(Gyro_filter) + "'></td></tr>";
-  String myVal;
-  if (!UPONLYMODE)
-    myVal = "";
-  else
-    myVal = "checked";
-  myString = myString + "<tr><td>Up Mode Only:</td><td><input type=CHECKBOX name=UPONLYMODE value='true' " + (myVal) + "></td></tr>";
-  myString = myString + "</table>";
-  myString = myString + "<table class=table><thead class=thead-dark><th></th><th>Kp</th><th>Ki</th><th>Kd</th></thead>";
-  myString = myString + "<tr><td>Roll:</td><td><input name=kp_roll_angle style='width:70px;' type=number step=.001 value='" + String(Kp_roll_angle) + "'></td><td><input style='width:70px;' name=ki_roll_angle type=number step=.001 value='" + String(Ki_roll_angle) + "'></td><td><input name=kd_roll_angle type=number step=.001 style='width:70px;' value='" + String(Kd_roll_angle) + "'></td></tr>";
-  myString = myString + "<tr><td>Pitch:</td><td><input name=kp_pitch_angle  style='width:70px;' type=number step=.001 value='" + String(Kp_pitch_angle) + "'></td><td><input  style='width:70px;' name=ki_pitch_angle type=number step=.001 value='" + String(Ki_pitch_angle) + "'></td><td><input name=kd_pitch_angle type=number step=.001 style='width:70px;' value='" + String(Kd_pitch_angle) + "'></td></tr>";
-  myString = myString + "<tr><td>Yaw:</td><td><input name=kp_yaw type=number step=.001 style='width:70px;' value='" + String(Kp_yaw) + "'></td><td><input  style='width:70px;' type=number step=.001 name=ki_yaw value='" + String(Ki_yaw) + "'></td><td><input type=number step=.001 name=kd_yaw style='width:70px;' value='" + String(Kd_yaw) + "'></td></tr><input type=hidden name=ender value='0'>";
-  myString = myString + "</table><br>Tip: To use your parameters beyond this flight session, snapshot the screen for reference and update the code.<br>";
-  return myString;
-}
-
-void MakeWebPage(WiFiClient client, String html)
-{
-  // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-  // and a content-type so the client knows what's coming, then a blank line:
-  client.println("HTTP/1.1 200 OK");
-  client.println("Content-type:text/html");
-  client.println();
-
-  // the content of the HTTP response follows the header:
-  client.print("<head>");
-  client.print("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-  client.print("<link href=\"https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css\" rel=\"stylesheet\" integrity=\"sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU8tT94WrHftjDbrCEXSU1oBoqyl2QvZ6jIW3\" crossorigin=\"anonymous\">");
-  client.print("</head>");
-  client.print("<style>");
-  client.print("</style>");
-  client.print("<form method=get><div class='container'>");
-  client.print(html);
-  client.print(tuningProcedure());
-  client.print("</div></form>");
-  client.print("<script src=\"https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js\" integrity=\"sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p\" crossorigin=\"anonymous\"></script>");
-  client.println(); // The HTTP response ends with another blank line:
+  sendJSONResponse(client, "{\"status\":\"success\"}");
 }

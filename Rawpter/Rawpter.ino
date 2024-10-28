@@ -1,8 +1,3 @@
-//Rawpter 1.7 by Sean J. Miller
-//Flight Controller code for an Arduino Nano RP2040 Connect
-//Go to https://raisingawesome.site/projects for more info
-//MIT License - use at your own risk
-
 #include <SPI.h>
 #include <WiFiNINA.h>          //WiFi
 #include <Arduino_LSM6DSOX.h>  //IMU get from the Arduino IDE Library Manager
@@ -161,13 +156,17 @@ WiFiServer server(80);
 //========================================================================================================================//
 
 void setup() {
-  //Bootup operations
+  pinMode(LEDR, OUTPUT);
+  pinMode(LEDG, OUTPUT);
+  pinMode(LEDB, OUTPUT);
   
   analogReadResolution(12); //The RP2040 has a 12 bit ADC versus the standard 10 from the Uno
   setupSerial();
   if (ALLOW_WIFI) setupWiFi();  //At first power on, a WiFi hotspot is set up for talking to the drone. (SSID Rawpter, 12345678)
   setupDrone();
   setupBatteryMonitor();
+
+  digitalWrite(LEDG, HIGH); //GREEN
 }
 
 void loop() {
@@ -307,8 +306,10 @@ void tick() {
 //                                                      FUNCTIONS                                                         //
 //========================================================================================================================//
 
+/**
+ * Mixes scaled commands from PID controller to actuator outputs based on vehicle configuration
+ */
 void controlMixer() {
-  //DESCRIPTION: Mixes scaled commands from PID controller to actuator outputs based on vehicle configuration
   /*
    * Takes roll_PID, pitch_PID, and yaw_PID computed from the PID controller and appropriately mixes them for the desired
    * vehicle configuration. For example on a quadcopter, the left two motors should have +roll_PID while the right two motors
@@ -330,6 +331,9 @@ void controlMixer() {
   m2_command_scaled = constrain(m2_command_scaled, 0, 1.0);
   m3_command_scaled = constrain(m3_command_scaled, 0, 1.0);
   m4_command_scaled = constrain(m4_command_scaled, 0, 1.0);
+
+  // Delta Mixing
+  
 }
 
 /**
@@ -353,17 +357,8 @@ void getIMUdata() {
     AccX = AccX - AccErrorX;
     AccY = AccY - AccErrorY;
     AccY = AccY - AccErrorZ;
-    //Correct the outputs with the calculated error values
-    /*
-    //This was used to suppress noise.  However, it just slows things down.  There is already internal filters to the IMU.
-    AccX = (1.0 - Accel_filter) * AccX_prev + Accel_filter * AccX;
-    AccY = (1.0 - Accel_filter) * AccY_prev + Accel_filter * AccY;
-    AccZ = (1.0 - Accel_filter) * AccZ_prev + Accel_filter * AccZ;
-    AccX_prev = AccX;
-    AccY_prev = AccY;
-    AccZ_prev = AccZ;
-    */
-  } else return;
+  } 
+  // else return;
   if (IMU.gyroscopeAvailable()) {
     //Gyro
     IMU.readGyroscope(GyroX, GyroY, GyroZ);
@@ -371,84 +366,16 @@ void getIMUdata() {
     GyroX = GyroX - GyroErrorX;
     GyroY = GyroY - GyroErrorY;
     GyroZ = GyroZ - GyroErrorZ;
-    /*
-    //This was used to suppress noise.  However, it just slows things down.  There is already internal filters to the IMU.
-    GyroX = (1.0 - Gyro_filter) * GyroX_prev + Gyro_filter * GyroX;
-    GyroY = (1.0 - Gyro_filter) * GyroY_prev + Gyro_filter * GyroY;
-    GyroZ = (1.0 - Gyro_filter) * GyroZ_prev + Gyro_filter * GyroZ;
-    GyroX_prev = GyroX;
-    GyroY_prev = GyroY;
-    GyroZ_prev = GyroZ;
-    */
   }
-}
+  if (IMU.temperatureAvailable())
+  {
+    int temperature_deg = 0;
+    IMU.readTemperature(temperature_deg);
 
-/**
- * Computes IMU accelerometer and gyro error on startup. Note: vehicle should be powered up on flat surface
- */
-void calculate_IMU_error() {
-  /*
-   * The error values it computes are applied to the raw gyro and 
-   * accelerometer values AccX, AccY, AccZ, GyroX, GyroY, GyroZ in getIMUdata().
-   * this will correct for sensor drift and crookedness in your copter.
-   */
-  float AcX, AcY, AcZ, GyX, GyY, GyZ;
-
-  Serial.println("Calculating IMU Error with 10000 iterations. Please stand by...");
-
-  //Read IMU values 1000 times.  Should take around 2 minutes at 104Hz IMU timing.
-  int c = 0;AccErrorX=0;AccErrorY=0;AccErrorZ=0;GyroErrorX=0;GyroErrorY=0;GyroErrorZ=0;
-  while (c < 10000) {
-    while (!IMU.accelerationAvailable()&!IMU.gyroscopeAvailable()) delay(1);
-    IMU.readAcceleration(AcX, AcY, AcZ);
-    IMU.readGyroscope(GyX, GyY, GyZ);
-    AccX = AcX;
-    AccY = AcY;
-    AccZ = AcZ;
-    GyroX = GyX;
-    GyroY = GyY;
-    GyroZ = GyZ;
-
-    //Sum all readings
-    AccErrorX = AccErrorX + AccX;
-    AccErrorY = AccErrorY + AccY;
-    AccErrorZ = AccErrorZ + AccZ;
-    GyroErrorX = GyroErrorX + GyroX;
-    GyroErrorY = GyroErrorY + GyroY;
-    GyroErrorZ = GyroErrorZ + GyroZ;
-    c++;
-    Serial.println(String(10000-c));
+    Serial.print("LSM6DSOX Temperature = ");
+    Serial.print(temperature_deg);
+    Serial.println(" °C");
   }
-  //Divide the sum by 12000 to get the error value
-  AccErrorX = AccErrorX / c;
-  AccErrorY = AccErrorY / c;
-  AccErrorZ = AccErrorZ / c - 1.0;
-  GyroErrorX = GyroErrorX / c;
-  GyroErrorY = GyroErrorY / c;
-  GyroErrorZ = GyroErrorZ / c;
-
-  Serial.print("float AccErrorX = ");
-  Serial.print(AccErrorX);
-  Serial.println(";");
-  Serial.print("float AccErrorY = ");
-  Serial.print(AccErrorY);
-  Serial.println(";");
-  Serial.print("float AccErrorZ = ");
-  Serial.print(AccErrorZ);
-  Serial.println(";");
-
-  Serial.print("float GyroErrorX = ");
-  Serial.print(GyroErrorX);
-  Serial.println(";");
-  Serial.print("float GyroErrorY = ");
-  Serial.print(GyroErrorY);
-  Serial.println(";");
-  Serial.print("float GyroErrorZ = ");
-  Serial.print(GyroErrorZ);
-  Serial.println(";");
-
-  Serial.println("Paste these values in user specified variables section and comment out calculate_IMU_error() in void setup.");
-  while (true) delay(1000);
 }
 
 /**
@@ -638,6 +565,8 @@ void scaleCommands() {
  * Get raw PWM values for every channel from the radio
  */
 void getRadioSticks() {
+  rcUpdate();
+
   /*
    * Updates radio PWM commands in loop based on current available commands. channel_x_pwm is the raw command used in the rest of 
    * the loop.
@@ -805,101 +734,6 @@ void tock() {
   };
 }
 
-
-
-//========================================================================================================================//
-
-//This file contains all necessary functions and code used for radio communication to avoid cluttering the main code
-
-void radioSetup() {
-  //PWM Receiver
-  //Declare interrupt pins
-  pinMode(throttlePin, INPUT_PULLUP);
-  pinMode(rollPin, INPUT_PULLUP);
-  pinMode(upDownPin, INPUT_PULLUP);
-  pinMode(ruddPin, INPUT_PULLUP);
-  pinMode(throttleCutSwitchPin, INPUT_PULLUP);
-
-  delay(20);
-  //Attach interrupt and point to corresponding ISR functions
-  attachInterrupt(digitalPinToInterrupt(throttlePin), getCh1, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(rollPin), getCh2, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(upDownPin), getCh3, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ruddPin), getCh4, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(throttleCutSwitchPin), getCh5, CHANGE);
-
-  delay(20);
-}
-
-unsigned long getRadioPWM(int ch_num) {
-  //DESCRIPTION: Get current radio commands from interrupt routines
-  unsigned long returnPWM = 0;
-
-  if (ch_num == 1) {
-    returnPWM = channel_1_raw;
-  } else if (ch_num == 2) {
-    returnPWM = channel_2_raw;
-  } else if (ch_num == 3) {
-    returnPWM = channel_3_raw;
-  } else if (ch_num == 4) {
-    returnPWM = channel_4_raw;
-  } else if (ch_num == 5) {
-    returnPWM = channel_5_raw;
-  }
-  return returnPWM;
-}
-
-//========================================================================================================================//
-
-//INTERRUPT SERVICE ROUTINES (for reading PWM and PPM)
-
-void getCh1() {
-  int trigger = digitalRead(throttlePin);
-  if (trigger == 1) {
-    rising_edge_start_1 = micros();
-  } else if (trigger == 0) {
-    channel_1_raw = micros() - rising_edge_start_1;
-  }
-}
-
-void getCh2() {
-  int trigger = digitalRead(rollPin);
-  if (trigger == 1) {
-    rising_edge_start_2 = micros();
-  } else if (trigger == 0) {
-    channel_2_raw = micros() - rising_edge_start_2;
-  }
-}
-
-void getCh3() {
-  int trigger = digitalRead(upDownPin);
-  if (trigger == 1) {
-    rising_edge_start_3 = micros();
-  } else if (trigger == 0) {
-    channel_3_raw = micros() - rising_edge_start_3;
-  }
-}
-
-void getCh4() {
-  int trigger = digitalRead(ruddPin);
-  if (trigger == 1) {
-    rising_edge_start_4 = micros();
-  } else if (trigger == 0) {
-    channel_4_raw = micros() - rising_edge_start_4;
-  }
-}
-
-void getCh5() {
-  int trigger = digitalRead(throttleCutSwitchPin);
-  if (trigger == 1) {
-    rising_edge_start_5 = micros();
-  } else if (trigger == 0) {
-    channel_5_raw = micros() - rising_edge_start_5;
-  }
-}
-
-//HELPER FUNCTIONS
-
 float invSqrt(float x) {
-  return 1.0 / sqrtf(x);  //Teensy is fast enough to just take the compute penalty lol suck it arduino nano
+  return 1.0 / sqrtf(x);  //board is fast enough to just take the compute penalty lol suck it arduino nano
 }

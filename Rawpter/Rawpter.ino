@@ -85,24 +85,11 @@ const int upDownPin = stickRightVertical;   //ele
 const int ruddPin = stickLeftHorizontal;    //rudd
 const int throttleCutSwitchPin = SwitchA;   //gear (throttle cut)
 
-//variables for reading PWM from the radio receiver
-unsigned long rising_edge_start_1, rising_edge_start_2, rising_edge_start_3, rising_edge_start_4, rising_edge_start_5, rising_edge_start_6;
-unsigned long channel_1_raw = 0;
-unsigned long channel_2_raw = 0;
-unsigned long channel_3_raw = 0;
-unsigned long channel_4_raw = 0;
-unsigned long channel_5_raw = 0;
-
-int ppm_counter = 0;
-unsigned long time_ms = 0;
 int throttleCutCounter = 0;
 int throttleNotCutCounter = 0;
 //Motor Electronic Speed Control Modules (ESC):
-const int m1Pin = 10;  //10
-const int m2Pin = 15;  //15
-const int m3Pin = 16;  //16
-const int m4Pin = 14;  //14
-Servo m1PWM, m2PWM, m3PWM, m4PWM;
+const int motorPins[] = {10, 15, 16, 14}; // m1Pin, m2Pin, m3Pin, m4Pin
+Servo motorPWM[4]; // m1PWM, m2PWM, m3PWM, m4PWM
 
 //========================================================================================================================//
 //DECLARE GLOBAL VARIABLES
@@ -137,7 +124,8 @@ float error_pitch, error_pitch_prev, pitch_des_prev, integral_pitch, integral_pi
 float error_yaw, error_yaw_prev, integral_yaw, integral_yaw_prev, derivative_yaw, yaw_PID = 0;
 
 //Mixer
-float m1_command_scaled, m2_command_scaled, m3_command_scaled, m4_command_scaled;
+float motor_command_scaled[4]; // m1_command_scaled, m2_command_scaled, etc
+int motor_command_PWM[4]; // m1_command_PWM, m2_command_PWM, etc
 
 int m1_command_PWM, m2_command_PWM, m3_command_PWM, m4_command_PWM;
 unsigned long buzzer_millis;
@@ -182,40 +170,35 @@ void loop() {
 }
 
 void setupDrone() {
-  //Initialize all pins
-  pinMode(m1Pin, OUTPUT);
-  pinMode(m2Pin, OUTPUT);
-  pinMode(m3Pin, OUTPUT);
-  pinMode(m4Pin, OUTPUT);
-  m1PWM.attach(m1Pin, 1060, 1860);
-  m2PWM.attach(m2Pin, 1060, 1860);
-  m3PWM.attach(m3Pin, 1060, 1860);
-  m4PWM.attach(m4Pin, 1060, 1860);
-  //Set built in LED to turn on to signal startup
+  // Initialize motor pins
+  for(int i = 0; i < 4; i++) {
+    pinMode(motorPins[i], OUTPUT);
+    motorPWM[i].attach(motorPins[i], 1060, 1860);
+  }
+  
   delay(5);
 
-  //Initialize radio communication
   radioSetup();
   setToFailsafe();
-  PWM_throttle = PWM_throttle_zero;  //zero may not necessarily be the failsafe, but on startup we want zero.
+  PWM_values[0] = PWM_throttle_zero; // Set throttle to zero on startup
 
-  //Initialize IMU communication
   IMUinit();
 
-  //Get IMU error to zero accelerometer and gyro readings, assuming vehicle is level when powered up
- // calculate_IMU_error(); //Calibration parameters printed to serial monitor. Paste these in the user specified variables section, then comment this out forever.
+  // Early return if IMU calibration needed
+  if (getRadioPWM(1) > 1800 && getRadioPWM(1) < 2400 && !EASYCHAIR) {
+    calibrateESCs();
+    return;
+  }
 
-  if (getRadioPWM(1) > 1800 && getRadioPWM(1) < 2400 & !EASYCHAIR) calibrateESCs();  //if the throttle is up, first calibrate ESCs before going into the loop
+  // Initialize motor commands to zero
+  for(int i = 0; i < 4; i++) {
+    motor_command_PWM[i] = 0;
+  }
 
-  m1_command_PWM = 0;  //Will send the default for motor stopped for Simonk firmware
-  m2_command_PWM = 0;
-  m3_command_PWM = 0;
-  m4_command_PWM = 0;
-
-
-  while (getRadioPWM(1) > 1060 && getRadioPWM(1) < 2400 && !EASYCHAIR && getRadioPWM(5) < 1300)  //wait until the throttle is turned down and throttlecut switch is not engaged before allowing anything else to happen.
-  {
+  // Early return if waiting for throttle down
+  if (getRadioPWM(1) > 1060 && getRadioPWM(1) < 2400 && !EASYCHAIR && getRadioPWM(5) < 1300) {
     delay(1000);
+    return;
   }
 }
 
@@ -310,30 +293,28 @@ void tick() {
  * Mixes scaled commands from PID controller to actuator outputs based on vehicle configuration
  */
 void controlMixer() {
-  /*
-   * Takes roll_PID, pitch_PID, and yaw_PID computed from the PID controller and appropriately mixes them for the desired
-   * vehicle configuration. For example on a quadcopter, the left two motors should have +roll_PID while the right two motors
-   * should have -roll_PID. Front two should have -pitch_PID and the back two should have +pitch_PID etc... every motor has
-   * normalized (0 to 1) thro_des command for throttle control.
-   * 
-   *Relevant variables:
-   *thro_des - direct thottle control
-   *roll_PID, pitch_PID, yaw_PID - stabilized axis variables  
-   */
+  // Early return if invalid inputs
+  if (!thro_des || !roll_PID || !pitch_PID || !yaw_PID) {
+    return;
+  }
 
-  //Quad mixing. maxMotor is used to keep the motors from being too violent if you have a big battery and concers about that.
-  m1_command_scaled = maxMotor * (thro_des) - pitch_PID + roll_PID + yaw_PID;    //Front left
-  m2_command_scaled = maxMotor * (thro_des) - pitch_PID - roll_PID - yaw_PID;    //Front right
-  m3_command_scaled = maxMotor * (thro_des) + pitch_PID - roll_PID + yaw_PID;    //Back Right
-  m4_command_scaled = maxMotor * (thro_des) + pitch_PID + roll_PID - yaw_PID;    //Back Left
+  // Mixing coefficients for each motor
+  const float mixTable[4][4] = {
+    // thro, pitch, roll, yaw
+    {maxMotor, -1, 1, 1},  // Motor 1 (Front Left)
+    {maxMotor, -1, -1, -1}, // Motor 2 (Front Right) 
+    {maxMotor, 1, -1, 1},   // Motor 3 (Back Right)
+    {maxMotor, 1, 1, -1}    // Motor 4 (Back Left)
+  };
 
-  m1_command_scaled = constrain(m1_command_scaled, 0, 1.0);
-  m2_command_scaled = constrain(m2_command_scaled, 0, 1.0);
-  m3_command_scaled = constrain(m3_command_scaled, 0, 1.0);
-  m4_command_scaled = constrain(m4_command_scaled, 0, 1.0);
-
-  // Delta Mixing
-  
+  // Calculate mixed output for each motor
+  for(int i = 0; i < 4; i++) {
+    motor_command_scaled[i] = mixTable[i][0] * thro_des + 
+                             mixTable[i][1] * pitch_PID +
+                             mixTable[i][2] * roll_PID + 
+                             mixTable[i][3] * yaw_PID;
+    motor_command_scaled[i] = constrain(motor_command_scaled[i], 0, 1.0);
+  }
 }
 
 /**
@@ -551,14 +532,9 @@ void PIDControlCalcs() {
  * Scale normalized actuator commands to values for ESC protocol
  */
 void scaleCommands() {
-  /*
-   * The actual pulse width is set at the servo attach.
-   */
-  //Scale to Servo PWM 0-180 degrees for stop to full speed.  No need to constrain since mx_command_scaled already is.
-  m1_command_PWM = m1_command_scaled * 180;
-  m2_command_PWM = m2_command_scaled * 180;
-  m3_command_PWM = m3_command_scaled * 180;
-  m4_command_PWM = m4_command_scaled * 180;  
+  for(int i = 0; i < 4; i++) {
+    motor_command_PWM[i] = motor_command_scaled[i] * 180;
+  }
 }
 
 /**
@@ -567,35 +543,28 @@ void scaleCommands() {
 void getRadioSticks() {
   rcUpdate();
 
-  /*
-   * Updates radio PWM commands in loop based on current available commands. channel_x_pwm is the raw command used in the rest of 
-   * the loop.
-   * The raw radio commands are filtered with a first order low-pass filter to eliminate any really high frequency noise. 
-   */
+  // Get raw values
+  PWM_values[0] = getRadioPWM(1); // throttle
+  PWM_values[1] = getRadioPWM(2); // roll
+  PWM_values[2] = getRadioPWM(3); // elevation  
+  PWM_values[3] = getRadioPWM(4); // rudd
+  PWM_values[4] = getRadioPWM(5); // throttle cut
 
-  PWM_throttle = getRadioPWM(1);
-  PWM_roll = getRadioPWM(2);
-  PWM_Elevation = getRadioPWM(3);
-  PWM_Rudd = getRadioPWM(4);
-  PWM_ThrottleCutSwitch = getRadioPWM(5);
-
-  //Low-pass the critical commands and update previous values
-  if (PWM_throttle - PWM_throttle_prev < 0)
-  {
-    //Going down  - slow
-    PWM_throttle = (.95) * PWM_throttle_prev + 0.05 * PWM_throttle;
-  } else 
-  { //Going up - fast
-    PWM_throttle = (stick_dampener)*PWM_throttle_prev + (1 - stick_dampener) * PWM_throttle;
+  // Early return if values invalid
+  if (!validatePWMValues()) {
+    return;
   }
-  PWM_roll = (1.0 - stick_dampener) * PWM_roll_prev + stick_dampener * PWM_roll;
-  PWM_Elevation = (1.0 - stick_dampener) * PWM_Elevation_prev + stick_dampener * PWM_Elevation;
-  PWM_Rudd = (1.0 - stick_dampener) * PWM_Rudd_prev + stick_dampener * PWM_Rudd;
 
-  PWM_throttle_prev = PWM_throttle;
-  PWM_roll_prev = PWM_roll;
-  PWM_Elevation_prev = PWM_Elevation;
-  PWM_Rudd_prev = PWM_Rudd;
+  // Apply filters
+  PWM_values[0] = filterThrottle(PWM_values[0], PWM_prev[0]);
+  for(int i = 1; i < 4; i++) {
+    PWM_values[i] = filterStick(PWM_values[i], PWM_prev[i]);
+  }
+
+  // Update previous values
+  for(int i = 0; i < 4; i++) {
+    PWM_prev[i] = PWM_values[i];
+  }
 }
 
 void setToFailsafe() {
@@ -640,10 +609,9 @@ void failSafe() {
  * Send pulses to motor pins
  */
 void commandMotors() {
-  m1PWM.write(m1_command_PWM);
-  m2PWM.write(m2_command_PWM);
-  m3PWM.write(m3_command_PWM);
-  m4PWM.write(m4_command_PWM);
+  for(int i = 0; i < 4; i++) {
+    motorPWM[i].write(motor_command_PWM[i]);
+  }
 }
 
 /**
@@ -654,15 +622,13 @@ void calibrateESCs() {
    *  Simulates the void loop(), but only for the purpose of providing throttle pass through to the motors, so that you can
    *  power up with throttle at full, let ESCs begin arming sequence, and lower throttle to zero.
    */
-  m1PWM.write(180);
-  m2PWM.write(180);
-  m3PWM.write(180);
-  m4PWM.write(180);
+  for(int i = 0; i < 4; i++) {
+    motorPWM[i].write(180);
+  }
   delay(5000);
-  m1PWM.write(0);
-  m2PWM.write(0);
-  m3PWM.write(0);
-  m4PWM.write(0);
+  for(int i = 0; i < 4; i++) {
+    motorPWM[i].write(0);
+  }
   delay(5000);
 }
 
@@ -711,11 +677,11 @@ void throttleCut() {
  */
 void killMotors() {
   throttle_is_cut = true;
-  throttleCutCounter=10; //to prevent overflowing float
-  m1_command_PWM = 0;
-  m2_command_PWM = 0;
-  m3_command_PWM = 0;
-  m4_command_PWM = 0;
+  throttleCutCounter = 10;
+  
+  for(int i = 0; i < 4; i++) {
+    motor_command_PWM[i] = 0;
+  }
 }
 
 /**
@@ -736,4 +702,27 @@ void tock() {
 
 float invSqrt(float x) {
   return 1.0 / sqrtf(x);  //board is fast enough to just take the compute penalty lol suck it arduino nano
+}
+
+// Helper function to filter throttle
+float filterThrottle(float current, float prev) {
+  if (current - prev < 0) {
+    return 0.95 * prev + 0.05 * current; // Going down - slow
+  }
+  return stick_dampener * prev + (1 - stick_dampener) * current; // Going up - fast
+}
+
+// Helper function to filter other sticks
+float filterStick(float current, float prev) {
+  return (1.0 - stick_dampener) * prev + stick_dampener * current;
+}
+
+// Helper function to validate PWM values
+bool validatePWMValues() {
+  for(int i = 0; i < 5; i++) {
+    if (PWM_values[i] < 800 || PWM_values[i] > 2200) {
+      return false;
+    }
+  }
+  return true;
 }

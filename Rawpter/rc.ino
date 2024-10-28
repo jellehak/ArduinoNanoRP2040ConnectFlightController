@@ -57,6 +57,17 @@ unsigned long getRadioPWM(int ch) {
 
 #ifdef USE_RCIN_PWM
 
+//variables for reading PWM from the radio receiver
+unsigned long rising_edge_start_1, rising_edge_start_2, rising_edge_start_3, rising_edge_start_4, rising_edge_start_5, rising_edge_start_6;
+unsigned long channel_1_raw = 0;
+unsigned long channel_2_raw = 0;
+unsigned long channel_3_raw = 0;
+unsigned long channel_4_raw = 0;
+unsigned long channel_5_raw = 0;
+
+int ppm_counter = 0;
+unsigned long time_ms = 0;
+
 void radioSetup() {
   //PWM Receiver
   //Declare interrupt pins

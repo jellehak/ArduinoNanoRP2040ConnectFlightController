@@ -7,7 +7,8 @@ rcin_GetPWM(int *pwm) -> fills pwm[0..RCIN_NUM_CHANNELS-1] received PWM values, 
 
 Uses: rc, HW_PIN_RCIN_RX, RCIN_NUM_CHANNELS
 ========================================================================================================================*/
-#define USE_RCIN_CRSF
+// #define USE_RCIN_CRSF
+#define USE_RCIN_SBUS
 #define RCIN_NUM_CHANNELS  7 //number of receiver channels (minimal 6)
 
 HardwareSerial *rc = &Serial1;
@@ -23,6 +24,10 @@ CRSF crsf;
 // int rcin_pwm[RCIN_NUM_CHANNELS]; //filtered raw PWM values
 
 uint16_t *pwm;
+
+unsigned long getRadioPWM(int ch) {
+  return pwm[ch];
+}
 
 void radioSetup() {
   Serial.println("USE_RCIN_CRSF");
@@ -45,11 +50,6 @@ bool rcUpdate() {
     
     return rv;
 }
-
-unsigned long getRadioPWM(int ch) {
-  return pwm[ch];
-}
-
 #endif
 
 // ======
@@ -157,6 +157,46 @@ void getCh5() {
   } else if (trigger == 0) {
     channel_5_raw = micros() - rising_edge_start_5;
   }
+}
+
+#endif
+
+//========================================================================================================================
+//SBUS Receiver 
+//========================================================================================================================
+#if defined USE_RCIN_SBUS
+#warning "USE_RX_SBUS not ported/tested - see src/RCIN/RCIN.h" //TODO
+
+#include "rcin/sbus/SBUS.cpp" //sBus interface
+
+SBUS sbus(*rc);
+uint16_t sbusChannels[16];
+bool sbusFailSafe;
+bool sbusLostFrame;
+
+uint16_t *pwm;
+
+unsigned long getRadioPWM(int ch) {
+  return pwm[ch];
+}
+
+void radioSetup() {
+  Serial.println("USE_RX_SBUS");
+  sbus.begin();
+}
+
+bool rcUpdate() {
+    if (sbus.read(sbusChannels, &sbusFailSafe, &sbusLostFrame))
+    {
+        //sBus scaling below is for Taranis-Plus and X4R-SB
+        float scale = 0.615;
+        float bias  = 895.0;
+        for(int i=0;i<RCIN_NUM_CHANNELS;i++) {
+            pwm[i] = sbusChannels[i] * scale + bias;
+        }
+        return true;
+    }
+    return false;
 }
 
 #endif

@@ -13,6 +13,13 @@
 //The LOOP_TIMING is based on the IMU.  For the Arduino_LSM6DSOX, it is 104Hz.  So, the loop time is set a little longer so the IMU has time to update from the control change.
 #define LOOP_TIMING 100
 
+// Add these defines near the top of the file with other defines
+#define THROTTLE 0
+#define ROLL 1  
+#define ELEVATION 2
+#define RUDD 3
+#define THROTTLE_CUT 4
+
 //The battery alarm code handles 14.8 or 7.4V LIPOs.  Set to your type of battery. If not hooked up, it will pull down and beep often.
 #define BATTERYTYPE 14.8
 #define BUZZER_PIN 9
@@ -104,8 +111,8 @@ unsigned long print_counter, serial_counter;
 bool throttle_is_cut = true;  //used to force the pilot to manually set the throttle to zero after the switch is used to throttle cut
 
 //Radio communication:
-unsigned long PWM_throttle, PWM_roll, PWM_Elevation, PWM_Rudd, PWM_ThrottleCutSwitch;
-unsigned long PWM_throttle_prev, PWM_roll_prev, PWM_Elevation_prev, PWM_Rudd_prev;
+unsigned long PWM_values[5]; // throttle, roll, elevation, rudd, throttleCutSwitch
+unsigned long PWM_prev[4]; // throttle_prev, roll_prev, elevation_prev, rudd_prev 
 
 //IMU:
 float AccX, AccY, AccZ;
@@ -453,10 +460,10 @@ void getDesiredAnglesAndThrottle() {
    * roll_des and pitch_des are scaled to be within max roll/pitch amount in degrees
    * yaw_des is scaled to be within max yaw in degrees/sec.
    */
-  thro_des = (PWM_throttle - 1000.0) / 1000.0;   //Between 0 and 1
-  roll_des = (PWM_roll - 1500.0) / 500.0;        //Between -1 and 1
-  pitch_des = (PWM_Elevation - 1500.0) / 500.0;  //Between -1 and 1
-  yaw_des = (PWM_Rudd - 1500.0) / 500.0;         //Between -1 and 1
+  thro_des = (PWM_values[THROTTLE] - 1000.0) / 1000.0;   // throttle
+  roll_des = (PWM_values[ROLL] - 1500.0) / 500.0;    // roll
+  pitch_des = (PWM_values[ELEVATION] - 1500.0) / 500.0;   // elevation
+  yaw_des = (PWM_values[RUDD] - 1500.0) / 500.0;     // rudd
 
   //Constrain within normalized bounds
   thro_des = constrain(thro_des, 0.0, 1.0);                //Between 0 and 1
@@ -481,7 +488,7 @@ void PIDControlCalcs() {
    */
 
 
-  if (PWM_throttle < 1030)
+  if (PWM_values[THROTTLE] < 1030)
   { //This will keep the motors from spinning with the throttle at zero should the drone be sitting unlevel.
     integral_roll_prev = 0;
     integral_pitch_prev = 0;
@@ -544,11 +551,11 @@ void getRadioSticks() {
   rcUpdate();
 
   // Get raw values
-  PWM_values[0] = getRadioPWM(1); // throttle
-  PWM_values[1] = getRadioPWM(2); // roll
-  PWM_values[2] = getRadioPWM(3); // elevation  
-  PWM_values[3] = getRadioPWM(4); // rudd
-  PWM_values[4] = getRadioPWM(5); // throttle cut
+  PWM_values[THROTTLE] = getRadioPWM(1);
+  PWM_values[ROLL] = getRadioPWM(2);
+  PWM_values[ELEVATION] = getRadioPWM(3);
+  PWM_values[RUDD] = getRadioPWM(4);
+  PWM_values[THROTTLE_CUT] = getRadioPWM(5);
 
   // Early return if values invalid
   if (!validatePWMValues()) {
@@ -556,23 +563,23 @@ void getRadioSticks() {
   }
 
   // Apply filters
-  PWM_values[0] = filterThrottle(PWM_values[0], PWM_prev[0]);
-  for(int i = 1; i < 4; i++) {
+  PWM_values[THROTTLE] = filterThrottle(PWM_values[THROTTLE], PWM_prev[THROTTLE]);
+  for(int i = ROLL; i <= RUDD; i++) {
     PWM_values[i] = filterStick(PWM_values[i], PWM_prev[i]);
   }
 
   // Update previous values
-  for(int i = 0; i < 4; i++) {
+  for(int i = THROTTLE; i <= RUDD; i++) {
     PWM_prev[i] = PWM_values[i];
   }
 }
 
 void setToFailsafe() {
-  PWM_throttle = PWM_throttle_fs;
-  PWM_roll = PWM_roll_fs;
-  PWM_Elevation = PWM_elevation_fs;
-  PWM_Rudd = PWM_rudd_fs;
-  PWM_ThrottleCutSwitch = PWM_ThrottleCutSwitch_fs;  //this is so the throttle cut routine doesn't override the fail safes.
+  PWM_values[THROTTLE] = PWM_throttle_fs;
+  PWM_values[ROLL] = PWM_roll_fs;
+  PWM_values[ELEVATION] = PWM_elevation_fs;
+  PWM_values[RUDD] = PWM_rudd_fs;
+  PWM_values[THROTTLE_CUT] = PWM_ThrottleCutSwitch_fs;
 }
 
 /**
@@ -594,14 +601,15 @@ void failSafe() {
   //if (PWM_ThrottleCutSwitch>maxVal || PWM_ThrottleCutSwitch<minVal || PWM_throttle > maxVal || PWM_throttle < minVal || PWM_roll > maxVal ||PWM_roll < minVal || PWM_Elevation > maxVal || PWM_Elevation < minVal || PWM_Rudd > maxVal || PWM_Rudd < minVal)
 
 
-  if (PWM_throttle < 800 || PWM_throttle > 2200)  //this is the less conservative version to get through this routine faster.
-  {
+  if (PWM_values[THROTTLE] < 800 || PWM_values[THROTTLE] > 2200) {  // Check throttle
     failsafed = true;
     setToFailsafe();
-  } else failsafed = false;
+  } else {
+    failsafed = false;
+  }
   
   #if EASYCHAIR
-    PWM_throttle = 1500;  //For testing in the easy chair with the Arduino out of the drone.  See the compiler directive at the top of the code.
+    PWM_values[THROTTLE] = 1500;  //For testing in the easy chair
   #endif
 }
 
@@ -641,33 +649,41 @@ void calibrateESCs() {
  */
 void throttleCut() {
   #if EASYCHAIR 
-    //This is set above in compiler directives for when you are testing the Arduino outside of the drone.
     throttle_is_cut = false;
     return;
   #endif
 
-  if (throttle_is_cut) killMotors();  //make sure we keep those motors at 0 if the throttle was cut.
-
-  if (PWM_ThrottleCutSwitch < 1300) {
-    //throttleCutCounter will ensure it is not just a blip that has caused a false cut.
-    if (++throttleCutCounter > 10) killMotors();
+  if (throttle_is_cut) {
+    killMotors();
     return;
   }
-  if (throttle_is_cut && PWM_ThrottleCutSwitch > 1500) {
-    //reset only if throttle is down to prevent a jolting suprise
-    if (PWM_throttle < 1040 && ++throttleNotCutCounter > 10) {
+
+  if (PWM_values[THROTTLE_CUT] < 1300) {
+    if (++throttleCutCounter > 10) {
+      killMotors();
+    }
+    return;
+  }
+
+  if (throttle_is_cut && PWM_values[THROTTLE_CUT] > 1500) {
+    if (PWM_values[THROTTLE] < 1040 && ++throttleNotCutCounter > 10) {
       throttle_is_cut = false;
       throttleNotCutCounter = 0;
       throttleCutCounter = 0;
-    } else killMotors();
+    } else {
+      killMotors();
+    }
     return;
   }
 
   //Handle when things are going upside down
   if (roll_IMU > 55 || roll_IMU < -55 || pitch_IMU > 55 || pitch_IMU < -55) {
-    if (++throttleCutCounter > 4) killMotors();
+    if (++throttleCutCounter > 4) {
+      killMotors();
+    }
     return;
   }
+  
   throttleNotCutCounter = 0;
   throttleCutCounter = 0;
 }

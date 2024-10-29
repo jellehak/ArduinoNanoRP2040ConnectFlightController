@@ -147,7 +147,7 @@ String createJSON()
   doc["pitch_des"] = pitch_des;
   doc["pitch_IMU"] = pitch_IMU;
   doc["loop_time"] = int(round(1 / deltaTime));
-  doc["PWM_throttle"] = PWM_throttle;
+  doc["PWM_throttle"] = PWM_values[THROTTLE];
   doc["battery_voltage"] = (4.4695 / 104.0 + ((float)batteryVoltage / 104.0));
   doc["maxMotor"] = maxMotor;
   doc["stick_dampener"] = stick_dampener;

@@ -217,9 +217,7 @@ void loopDrone() {
   controlMixer();                                          //Mixes PID outputs to scaled actuator commands -- custom mixing assignments done here
   scaleCommands();                                         //Scales motor commands to 0-1
   throttleCut();                                           //Directly sets motor commands to off based on channel 5 being switched
-    #if EASYCHAIR
-    Troubleshooting();                                       //will do the print routines that are uncommented
-    #endif
+  Troubleshooting();                                       //will do the print routines that are uncommented
   commandMotors();                                         //Sends command pulses to each ESC pin to drive the motors
   getRadioSticks();                                        //Gets the PWM from the radio receiver
   failSafe();                                              //Prevent failures in event of bad receiver connection, defaults to failsafe values assigned in setup
@@ -266,7 +264,15 @@ void loopBuzzer()
   }
 }
 
+void printJSON() {
+  String tick = createJSON();
+  Serial.println(tick);
+}
+
 void Troubleshooting() {
+  if (current_time - print_counter < 34000) return;  //Don't go too fast or it slows down the main loop
+  print_counter = micros();
+
   //Print data at 100hz (uncomment one at a time for troubleshooting)
   //printRadioData();     //Prints radio pwm values (expected: 1000 to 2000)
   //printDesiredState();  //Prints desired vehicle state commanded in either degrees or deg/sec (expected: +/- maxAXIS for roll, pitch, yaw; 0 to 1 for throttle)
@@ -276,9 +282,9 @@ void Troubleshooting() {
   //printPIDoutput();     //Prints computed stabilized PID variables from controller and desired setpoint (expected: ~ -1 to 1)
   //printMotorCommands(); //Prints the values being written to the motors (expected: 1000 to 2000)
   //printtock();      //Prints the time between loops in microseconds (expected: microseconds between loop iterations and less the Gyro/Acc update speed.  Set by LOOP_TIMING)
-  #if EASYCHAIR
+  // #if EASYCHAIR
     printJSON();
-  #endif
+  // #endif
 }
 
 void setupSerial() {
@@ -355,15 +361,15 @@ void getIMUdata() {
     GyroY = GyroY - GyroErrorY;
     GyroZ = GyroZ - GyroErrorZ;
   }
-  if (IMU.temperatureAvailable())
-  {
-    int temperature_deg = 0;
-    IMU.readTemperature(temperature_deg);
+  // if (IMU.temperatureAvailable())
+  // {
+  //   int temperature_deg = 0;
+  //   IMU.readTemperature(temperature_deg);
 
-    Serial.print("LSM6DSOX Temperature = ");
-    Serial.print(temperature_deg);
-    Serial.println(" °C");
-  }
+  //   Serial.print("LSM6DSOX Temperature = ");
+  //   Serial.print(temperature_deg);
+  //   Serial.println(" °C");
+  // }
 }
 
 /**
